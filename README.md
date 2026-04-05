@@ -168,4 +168,4 @@ The code in this starter project is your editable project scaffold.
 
 ## Author credit
 
-Built for **Alan Masoud** as a ready-to-run GitHub starter project.
+Built BY Alan Masoud.
