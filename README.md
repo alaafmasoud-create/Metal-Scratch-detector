@@ -1,6 +1,6 @@
 # Metal Surface Scratch Detector
 
-A complete starter project for industrial visual inspection using **Python + OpenCV + Streamlit**.
+A starter project for industrial visual inspection using **Python + OpenCV + Streamlit**.
 
 This repository is designed as a practical first step toward surface defect detection on metallic parts.
 The app works **out of the box** with a classical computer-vision pipeline and is structured so it can be upgraded it to a deep-learning model.
