@@ -66,17 +66,17 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">Metal Surface Scratch Detector</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="subtitle">Upload a metal-surface image and inspect possible scratches with a ready-to-run OpenCV baseline.</div>',
+    '<div class="subtitle">Upload a metal-surface image and inspect possible scratches with a more conservative OpenCV baseline.</div>',
     unsafe_allow_html=True,
 )
 
 with st.sidebar:
     st.header("Settings")
     max_dim = st.slider("Max image dimension", min_value=640, max_value=1800, value=1408, step=32)
-    blur_kernel = st.select_slider("Blur kernel", options=[1, 3, 5, 7], value=3)
-    clip_limit = st.slider("CLAHE clip limit", min_value=1.0, max_value=5.0, value=2.5, step=0.1)
-    threshold_bias = st.slider("Threshold sensitivity", min_value=0.7, max_value=2.2, value=1.15, step=0.05)
-    min_area = st.slider("Minimum candidate area", min_value=5, max_value=120, value=18, step=1)
+    blur_kernel = st.select_slider("Blur kernel", options=[1, 3, 5, 7], value=5)
+    clip_limit = st.slider("CLAHE clip limit", min_value=1.0, max_value=5.0, value=1.5, step=0.1)
+    threshold_bias = st.slider("Threshold sensitivity", min_value=0.7, max_value=2.5, value=1.65, step=0.05)
+    min_area = st.slider("Minimum candidate area", min_value=5, max_value=160, value=24, step=1)
     show_debug = st.checkbox("Show debug maps", value=True)
 
 uploaded_file = st.file_uploader(
@@ -149,6 +149,10 @@ with col3:
     st.metric("Mask pixels", f"{result.metadata['mask_pixels']:,}")
     st.caption(f"Threshold: {result.metadata['threshold']:.2f}")
     st.caption(f"Score: {result.score:.4f}")
+    if "strong_candidates" in result.metadata:
+        st.caption(f"Strong candidates: {result.metadata['strong_candidates']}")
+    if "mask_ratio" in result.metadata:
+        st.caption(f"Mask ratio: {result.metadata['mask_ratio']:.4f}")
 
     filename = readable_filename(uploaded_file.name, suffix="_annotated.png")
     png_bytes = image_to_png_bytes(annotated_bgr)
