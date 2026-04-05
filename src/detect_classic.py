@@ -59,7 +59,7 @@ def _gradient_energy(gray: np.ndarray) -> np.ndarray:
     return mag.astype(np.uint8)
 
 
-def _clean_mask(mask: np.ndarray, min_area: int = 18) -> tuple[np.ndarray, list[tuple[int, int, int, int]]]:
+def _clean_mask(mask: np.ndarray, min_area: int = 24) -> tuple[np.ndarray, list[tuple[int, int, int, int]]]:
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     cleaned = np.zeros_like(mask)
     boxes: list[tuple[int, int, int, int]] = []
@@ -69,13 +69,16 @@ def _clean_mask(mask: np.ndarray, min_area: int = 18) -> tuple[np.ndarray, list[
         if area < min_area:
             continue
 
-        aspect = max(w, h) / max(1.0, min(w, h))
+        length = max(w, h)
+        thickness = max(1, min(w, h))
+        aspect = length / float(thickness)
         fill_ratio = area / float(max(1, w * h))
 
-        # Favor thin elongated regions typical of scratches.
-        if aspect < 1.8 and area < 140:
+        if aspect < 2.8:
             continue
-        if fill_ratio > 0.95 and area < 250:
+        if length < 18:
+            continue
+        if fill_ratio > 0.88 and area < 320:
             continue
 
         cleaned[labels == idx] = 255
@@ -88,36 +91,63 @@ def _clean_mask(mask: np.ndarray, min_area: int = 18) -> tuple[np.ndarray, list[
     return cleaned, boxes
 
 
+def _strong_candidates(
+    boxes: list[tuple[int, int, int, int]], image_shape: tuple[int, int]
+) -> list[tuple[int, int, int, int]]:
+    h, w = image_shape
+    min_len = max(45, int(min(h, w) * 0.05))
+
+    strong: list[tuple[int, int, int, int]] = []
+    for x, y, bw, bh in boxes:
+        length = max(bw, bh)
+        thickness = max(1.0, min(bw, bh))
+        aspect = length / thickness
+
+        if aspect >= 4.0 and length >= min_len:
+            strong.append((x, y, bw, bh))
+
+    return strong
+
+
 def _score_mask(mask: np.ndarray, boxes: list[tuple[int, int, int, int]], image_shape: tuple[int, int]) -> tuple[float, float]:
     h, w = image_shape
     img_area = float(max(1, h * w))
     mask_area = float(np.count_nonzero(mask))
     area_ratio = mask_area / img_area
 
-    long_box_bonus = 0.0
-    for _, _, bw, bh in boxes:
-        aspect = max(bw, bh) / max(1.0, min(bw, bh))
-        perimeter = 2.0 * (bw + bh)
-        long_box_bonus += min(0.25, aspect / 40.0) + min(0.20, perimeter / 2500.0)
+    if not boxes:
+        return 0.0, 0.0
 
-    raw_score = (area_ratio * 12.0) + long_box_bonus + min(0.3, len(boxes) * 0.03)
-    confidence = float(1.0 / (1.0 + np.exp(-(raw_score - 0.18) * 7.0)))
+    strong_boxes = _strong_candidates(boxes, image_shape)
+
+    if not strong_boxes:
+        raw_score = area_ratio * 1.2
+        confidence = float(min(0.35, max(0.01, raw_score * 10.0)))
+        return float(raw_score), confidence
+
+    strong_count = len(strong_boxes)
+    strong_ratio = strong_count / max(1, len(boxes))
+    largest_len_ratio = max(max(bw, bh) for _, _, bw, bh in strong_boxes) / max(1.0, min(h, w))
+
+    raw_score = (area_ratio * 1.5) + (strong_ratio * 1.1) + (largest_len_ratio * 1.6)
+    confidence = float(1.0 / (1.0 + np.exp(-(raw_score - 0.9) * 4.0)))
+
     return float(raw_score), confidence
 
 
 def detect_scratches_classic(
     artifacts: PreprocessArtifacts,
-    threshold_bias: float = 1.15,
-    min_area: int = 18,
+    threshold_bias: float = 1.65,
+    min_area: int = 24,
 ) -> DetectionResult:
     gray = artifacts.enhanced
     blackhat = _combine_blackhat(gray)
     gradient = _gradient_energy(gray)
 
-    fusion = cv2.addWeighted(blackhat, 0.75, gradient, 0.25, 0)
-    fusion_blur = cv2.GaussianBlur(fusion, (3, 3), 0)
+    fusion = cv2.addWeighted(blackhat, 0.78, gradient, 0.22, 0)
+    fusion_blur = cv2.GaussianBlur(fusion, (5, 5), 0)
 
-    base_thresh = max(8.0, float(np.mean(fusion_blur) + threshold_bias * np.std(fusion_blur)))
+    base_thresh = max(10.0, float(np.mean(fusion_blur) + threshold_bias * np.std(fusion_blur)))
     _, binary = cv2.threshold(fusion_blur, base_thresh, 255, cv2.THRESH_BINARY)
 
     kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -125,16 +155,32 @@ def detect_scratches_classic(
     opened = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open, iterations=1)
     closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel_close, iterations=1)
 
+    margin = max(8, int(min(gray.shape) * 0.02))
+    closed[:margin, :] = 0
+    closed[-margin:, :] = 0
+    closed[:, :margin] = 0
+    closed[:, -margin:] = 0
+
     cleaned, boxes = _clean_mask(closed, min_area=min_area)
     raw_score, confidence = _score_mask(cleaned, boxes, image_shape=gray.shape)
-    defect_detected = confidence >= 0.58 and len(boxes) > 0
+
+    strong_candidates = _strong_candidates(boxes, gray.shape)
+    mask_ratio = np.count_nonzero(cleaned) / float(cleaned.shape[0] * cleaned.shape[1])
+
+    defect_detected = (
+        confidence >= 0.62
+        and len(strong_candidates) >= 1
+        and mask_ratio < 0.08
+    )
 
     label = "Defect detected" if defect_detected else "No defect"
 
     metadata = {
         "threshold": base_thresh,
         "candidates": len(boxes),
+        "strong_candidates": len(strong_candidates),
         "mask_pixels": int(np.count_nonzero(cleaned)),
+        "mask_ratio": float(mask_ratio),
         "scale": artifacts.scale,
     }
 
@@ -144,7 +190,7 @@ def detect_scratches_classic(
         confidence=float(confidence),
         score=float(raw_score),
         mask=cleaned,
-        boxes=boxes,
+        boxes=strong_candidates if defect_detected else boxes,
         debug_images={
             "enhanced_gray": gray,
             "blackhat": blackhat,
