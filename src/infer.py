@@ -17,10 +17,10 @@ class InferenceOutput:
 def run_classic_inference(
     image_bgr: np.ndarray,
     max_dim: int = 1408,
-    blur_kernel: int = 3,
-    clip_limit: float = 2.5,
-    threshold_bias: float = 1.15,
-    min_area: int = 18,
+    blur_kernel: int = 5,
+    clip_limit: float = 1.5,
+    threshold_bias: float = 1.65,
+    min_area: int = 24,
 ) -> InferenceOutput:
     artifacts = preprocess_image(
         image_bgr=image_bgr,
