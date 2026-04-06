@@ -167,4 +167,4 @@ The code in this starter project is your editable project scaffold.
 
 ## Author credit
 
-Built By Alan Masoud.
+Built By Alan Masoud
